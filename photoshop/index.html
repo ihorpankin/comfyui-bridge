@@ -19,20 +19,21 @@
             flex-direction: column;
             box-sizing: border-box;
             overflow: hidden;
+            color: var(--uxp-host-text-color, #e0e0e0);
         }
 
         .content {
             flex: 1;
             overflow-y: auto;
-            padding: 8px;
+            padding: 12px;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 12px;
         }
 
         .footer {
             flex-shrink: 0;
-            padding: 8px;
+            padding: 12px;
             padding-top: 0;
         }
 
@@ -48,24 +49,18 @@
             gap: 6px;
         }
 
-        .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #f44336;
-        }
-
-        .dot.connected {
-            background: #4caf50;
-        }
-
-        .mode-toggle {
+        .mode-section {
             display: flex;
-            gap: 2px;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
         }
 
-        .mode-toggle sp-action-button {
+        .mode-section sp-detail {
             flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         sp-progressbar {
@@ -75,7 +70,13 @@
         .progress-section {
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 6px;
+        }
+
+        .progress-status-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
 
         sp-button#generateBtn {
@@ -84,7 +85,9 @@
 
         /* Settings dialog */
         dialog {
-            border: none;
+            background: var(--uxp-host-background-color, #323232);
+            color: var(--uxp-host-text-color, #e0e0e0);
+            border: 1px solid var(--uxp-host-border-color, #444);
             border-radius: 8px;
             padding: 16px;
             width: 280px;
@@ -111,21 +114,28 @@
             min-height: 16px;
         }
 
-        .test-result.success { color: #4caf50; }
-        .test-result.error { color: #f44336; }
+        .test-result.success { color: var(--spectrum-semantic-positive-color-default, #4caf50); }
+        .test-result.error { color: var(--spectrum-semantic-negative-color-default, #f44336); }
 
         /* Preview section */
+        #previewSection {
+            flex-shrink: 1;
+            min-height: 0;
+        }
+
         .preview-container {
             position: relative;
-            display: inline-block;
-            background: #1e1e1e;
+            background: var(--uxp-host-background-color, #1e1e1e);
+            border: 1px solid var(--uxp-host-border-color, #444);
             border-radius: 4px;
             overflow: hidden;
             line-height: 0;
         }
 
         .preview-container img {
-            max-width: 100%;
+            width: 100%;
+            max-height: 180px;
+            object-fit: contain;
             cursor: pointer;
         }
 
@@ -151,7 +161,7 @@
         }
 
         .preview-dismiss:hover {
-            background: rgba(244, 67, 54, 0.8);
+            background: var(--spectrum-semantic-negative-color-default, rgba(244, 67, 54, 0.8));
         }
 
         .preview-hint {
@@ -161,8 +171,57 @@
             right: 0;
             text-align: center;
             font-size: 10px;
-            color: rgba(255, 255, 255, 0.5);
+            color: var(--uxp-host-text-color, rgba(255, 255, 255, 0.5));
+            opacity: 0.5;
             pointer-events: none;
+        }
+
+        .settings-helper {
+            font-size: 10px;
+            color: var(--uxp-host-text-color, #999);
+            opacity: 0.6;
+            margin-top: 2px;
+        }
+
+        /* History section */
+        .history-section {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .history-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .history-thumb {
+            width: 72px;
+            height: 72px;
+            border-radius: 4px;
+            border: 2px solid var(--uxp-host-border-color, #444);
+            object-fit: cover;
+            cursor: pointer;
+            opacity: 0.75;
+            transition: opacity 0.15s, border-color 0.15s;
+        }
+
+        .history-thumb:hover {
+            opacity: 1;
+            border-color: var(--uxp-host-text-color, #ccc);
+        }
+
+        .history-thumb.latest {
+            border-color: var(--spectrum-semantic-positive-color-default, #4caf50);
+            opacity: 1;
         }
     </style>
 </head>
@@ -172,35 +231,58 @@
         <!-- Header -->
         <div class="header">
             <div class="connection-status">
-                <span class="dot" id="connDot"></span>
-                <sp-detail id="connLabel">Disconnected</sp-detail>
+                <sp-status-light id="connStatus" variant="negative" size="m">
+                    <sp-detail id="connLabel">Disconnected</sp-detail>
+                </sp-status-light>
             </div>
-            <sp-action-button quiet id="settingsBtn" title="Settings">
-                <sp-label>&#9881;</sp-label>
+            <sp-action-button quiet id="settingsBtn" title="Settings" aria-label="Connection settings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18" slot="icon">
+                    <path fill="currentColor" d="M16.45 7.4l-1.63-.27a5.67 5.67 0 0 0-.52-1.27l.96-1.32a.5.5 0 0 0-.05-.65l-1.1-1.1a.5.5 0 0 0-.65-.05l-1.32.96a5.67 5.67 0 0 0-1.27-.52L10.6 1.55a.5.5 0 0 0-.5-.42H8.55a.5.5 0 0 0-.49.42L7.8 3.18a5.67 5.67 0 0 0-1.27.52l-1.32-.96a.5.5 0 0 0-.65.05l-1.1 1.1a.5.5 0 0 0-.05.65l.96 1.32a5.67 5.67 0 0 0-.52 1.27l-1.63.27a.5.5 0 0 0-.42.5v1.55a.5.5 0 0 0 .42.49l1.63.27c.13.44.3.87.52 1.27l-.96 1.32a.5.5 0 0 0 .05.65l1.1 1.1a.5.5 0 0 0 .65.05l1.32-.96c.4.22.83.4 1.27.52l.27 1.63a.5.5 0 0 0 .49.42h1.55a.5.5 0 0 0 .5-.42l.27-1.63c.44-.13.87-.3 1.27-.52l1.32.96a.5.5 0 0 0 .65-.05l1.1-1.1a.5.5 0 0 0 .05-.65l-.96-1.32c.22-.4.4-.83.52-1.27l1.63-.27a.5.5 0 0 0 .42-.49V7.9a.5.5 0 0 0-.42-.5zM9.32 12a3 3 0 1 1 3-3 3 3 0 0 1-3 3z"/>
+                </svg>
             </sp-action-button>
         </div>
 
-        <!-- Mode Toggle -->
-        <div class="mode-toggle">
-            <sp-action-button id="modeMask" selected>Selection as Mask</sp-action-button>
-            <sp-action-button id="modeCrop">Selection Area Only</sp-action-button>
+        <sp-divider size="s"></sp-divider>
+
+        <!-- Mode -->
+        <div class="mode-section">
+            <sp-detail id="modeLabel">Selection as Mask</sp-detail>
+            <sp-switch id="modeSwitch" aria-label="Toggle between mask mode and crop mode"></sp-switch>
         </div>
 
+        <sp-divider size="s"></sp-divider>
+
         <!-- Progress (hidden by default) -->
-        <div class="progress-section" id="progressSection" hidden>
-            <sp-progressbar id="progressBar" value="0" max="100">
-                <sp-label slot="label" id="statusLabel"></sp-label>
-            </sp-progressbar>
+        <div class="progress-section" id="progressSection" hidden aria-live="polite">
+            <div class="progress-status-row">
+                <sp-status-light id="progressStatus" variant="info" size="s"></sp-status-light>
+                <sp-detail id="statusLabel"></sp-detail>
+            </div>
+            <sp-progressbar id="progressBar" value="0" max="100"></sp-progressbar>
         </div>
 
         <!-- Preview (hidden by default) -->
         <div id="previewSection" hidden>
+            <sp-detail>Result Preview</sp-detail>
             <div class="preview-container">
-                <img id="previewImage" alt="Result preview" />
-                <button class="preview-dismiss" id="dismissPreview" title="Dismiss">&times;</button>
+                <img id="previewImage" alt="AI generation result preview" role="button" tabindex="0" aria-label="Click to apply result to canvas" />
+                <button class="preview-dismiss" id="dismissPreview" title="Dismiss preview" aria-label="Dismiss preview">&times;</button>
                 <span class="preview-hint">Click image to apply</span>
             </div>
         </div>
+
+        <!-- History -->
+        <sp-divider size="s"></sp-divider>
+        <div class="history-header">
+            <sp-detail id="historyLabel">History</sp-detail>
+            <sp-switch id="historySwitch" aria-label="Toggle history on or off"></sp-switch>
+        </div>
+        <div id="historyControls" hidden style="display:none;">
+            <sp-action-button quiet id="clearHistoryBtn" title="Clear history" aria-label="Clear history">
+                <sp-label>Clear all</sp-label>
+            </sp-action-button>
+        </div>
+        <div class="history-grid" id="historyGrid" hidden></div>
     </div>
 
     <!-- Fixed footer -->
@@ -209,14 +291,16 @@
     </div>
 
     <!-- Settings Dialog -->
-    <dialog id="settingsDialog">
+    <dialog id="settingsDialog" aria-label="Connection Settings">
         <sp-heading size="S">Connection Settings</sp-heading>
+        <sp-divider size="s"></sp-divider>
         <div class="form-row">
-            <sp-textfield id="serverUrl" placeholder="http://123.456.789.0:8188">
+            <sp-textfield id="serverUrl" placeholder="http://127.0.0.1:8188">
                 <sp-label slot="label">Server URL (ComfyUI)</sp-label>
             </sp-textfield>
+            <div class="settings-helper">Enter the URL where ComfyUI is running</div>
         </div>
-        <div class="test-result" id="testResult"></div>
+        <div class="test-result" id="testResult" aria-live="polite"></div>
         <div class="dialog-buttons">
             <sp-button quiet id="cancelBtn">Cancel</sp-button>
             <sp-button id="testBtn">Test</sp-button>

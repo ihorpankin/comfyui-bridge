@@ -16,7 +16,7 @@
                 "default": "ComfyUI Bridge"
             },
             "minimumSize": {
-                "width": 220,
+                "width": 240,
                 "height": 120
             },
             "maximumSize": {

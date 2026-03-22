@@ -107,6 +107,7 @@ async def upload_handler(request):
                 crop_bounds = json.loads(await part.text())
 
         # Convert raw mask bytes to PNG if needed
+        mask_warning = None
         if raw_mask_data is not None and width > 0 and height > 0:
             mask_path = os.path.join(_data_dir, "ps_mask.png")
             expected_size = width * height
@@ -120,7 +121,8 @@ async def upload_handler(request):
                 # Size mismatch — create a white (no mask) fallback
                 mask_img = Image.new("L", (width, height), 255)
                 mask_img.save(mask_path, "PNG")
-                logger.warning(f"Raw mask size mismatch ({len(raw_mask_data)} vs {expected_size}), using white fallback")
+                mask_warning = f"Mask size mismatch ({len(raw_mask_data)} vs {expected_size}), using white fallback"
+                logger.warning(mask_warning)
 
         # Save metadata (including crop bounds for crop mode)
         meta = {"width": width, "height": height, "mode": mode}
@@ -130,7 +132,10 @@ async def upload_handler(request):
         with open(meta_path, "w") as f:
             json.dump(meta, f)
 
-        return web.json_response({"status": "ok", "width": width, "height": height, "mode": mode})
+        resp = {"status": "ok", "width": width, "height": height, "mode": mode}
+        if mask_warning:
+            resp["warning"] = mask_warning
+        return web.json_response(resp)
 
     except Exception as e:
         logger.error(f"Upload error: {e}")
@@ -183,7 +188,8 @@ async def status_handler(request):
 
 
 async def send_result_to_ps(image_base64, width, height):
-    """Called by SendToPS node to push result image to Photoshop."""
+    """Called by SendToPS node to push result image to Photoshop.
+    Returns True if sent successfully, False if no client connected."""
     if _connected_ws and not _connected_ws.closed:
         await _connected_ws.send_json({
             "type": "result",
@@ -192,5 +198,7 @@ async def send_result_to_ps(image_base64, width, height):
             "height": height
         })
         logger.info(f"Sent result to PS: {width}x{height}")
+        return True
     else:
         logger.warning("No Photoshop client connected, cannot send result")
+        return False

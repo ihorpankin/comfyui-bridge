@@ -10,9 +10,13 @@ let ws = null;
 let isGenerating = false;
 let selectionBounds = null;
 let pendingResult = null; // { base64, width, height, selectionBounds, mode }
+let generateTimeout = null;
+const MAX_HISTORY = 10;
+const generationHistory = []; // Array of { base64, width, height, selectionBounds, mode }
+let historyEnabled = false;
 
 // ─── DOM ───
-const connDot = document.getElementById("connDot");
+const connStatus = document.getElementById("connStatus");
 const connLabel = document.getElementById("connLabel");
 const settingsBtn = document.getElementById("settingsBtn");
 const settingsDialog = document.getElementById("settingsDialog");
@@ -25,11 +29,17 @@ const generateBtn = document.getElementById("generateBtn");
 const progressSection = document.getElementById("progressSection");
 const progressBar = document.getElementById("progressBar");
 const statusLabel = document.getElementById("statusLabel");
-const modeMask = document.getElementById("modeMask");
-const modeCrop = document.getElementById("modeCrop");
+const modeLabel = document.getElementById("modeLabel");
+const modeSwitch = document.getElementById("modeSwitch");
 const previewSection = document.getElementById("previewSection");
 const previewImage = document.getElementById("previewImage");
 const dismissPreview = document.getElementById("dismissPreview");
+const progressStatus = document.getElementById("progressStatus");
+const historyGrid = document.getElementById("historyGrid");
+const clearHistoryBtn = document.getElementById("clearHistoryBtn");
+const historyControls = document.getElementById("historyControls");
+const historySwitch = document.getElementById("historySwitch");
+const historyLabel = document.getElementById("historyLabel");
 
 // ─── Settings ───
 settingsBtn.addEventListener("click", () => {
@@ -69,17 +79,10 @@ testBtn.addEventListener("click", async () => {
     }
 });
 
-// ─── Mode Toggle ───
-modeMask.addEventListener("click", () => {
-    currentMode = "mask";
-    modeMask.setAttribute("selected", "");
-    modeCrop.removeAttribute("selected");
-});
-
-modeCrop.addEventListener("click", () => {
-    currentMode = "crop";
-    modeCrop.setAttribute("selected", "");
-    modeMask.removeAttribute("selected");
+// ─── Mode Switch ───
+modeSwitch.addEventListener("change", () => {
+    currentMode = modeSwitch.checked ? "crop" : "mask";
+    modeLabel.textContent = currentMode === "mask" ? "Selection as Mask" : "Selection Area Only";
 });
 
 // ─── Preview Actions ───
@@ -89,6 +92,13 @@ dismissPreview.addEventListener("click", () => {
 
 previewImage.addEventListener("click", async () => {
     await applyResultToCanvas();
+});
+
+previewImage.addEventListener("keydown", async (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        await applyResultToCanvas();
+    }
 });
 
 // ─── WebSocket ───
@@ -149,7 +159,7 @@ function connectWebSocket() {
 }
 
 function updateConnection(connected) {
-    connDot.className = connected ? "dot connected" : "dot";
+    connStatus.setAttribute("variant", connected ? "positive" : "negative");
     connLabel.textContent = connected ? "Connected" : "Disconnected";
 }
 
@@ -173,7 +183,19 @@ function handleWsMessage(msg) {
 function showProgress(value) {
     progressSection.hidden = false;
     progressBar.value = value;
+    progressStatus.setAttribute("variant", "info");
     statusLabel.textContent = `Generating... ${value}%`;
+}
+
+function clearGenerateTimeout() {
+    if (generateTimeout) { clearTimeout(generateTimeout); generateTimeout = null; }
+}
+
+function resetGenerateUI() {
+    clearGenerateTimeout();
+    isGenerating = false;
+    generateBtn.disabled = false;
+    generateBtn.textContent = "Generate";
 }
 
 function handleStatus(status, error) {
@@ -181,32 +203,46 @@ function handleStatus(status, error) {
         case "executing":
             progressSection.hidden = false;
             progressBar.value = 0;
+            progressStatus.setAttribute("variant", "info");
             statusLabel.textContent = "Starting...";
             break;
         case "complete":
+            clearGenerateTimeout();
+            progressStatus.setAttribute("variant", "positive");
             statusLabel.textContent = "Complete!";
             progressBar.value = 100;
             setTimeout(() => {
                 progressSection.hidden = true;
                 progressBar.value = 0;
-                isGenerating = false;
-                generateBtn.disabled = false;
-                generateBtn.textContent = "Generate";
+                resetGenerateUI();
             }, 1500);
             break;
         case "error":
+            progressStatus.setAttribute("variant", "negative");
             statusLabel.textContent = `Error: ${error || "Unknown"}`;
             progressBar.value = 0;
-            isGenerating = false;
-            generateBtn.disabled = false;
-            generateBtn.textContent = "Generate";
+            resetGenerateUI();
             break;
     }
 }
 
-// ─── Generate ───
+// ─── Generate / Cancel ───
 generateBtn.addEventListener("click", async () => {
-    if (isGenerating || !serverUrl) return;
+    // Cancel if already generating
+    if (isGenerating) {
+        try {
+            await fetch(`${serverUrl}/interrupt`, { method: "POST" });
+        } catch (e) {
+            console.warn("[PS Bridge] Cancel request failed:", e);
+        }
+        progressStatus.setAttribute("variant", "notice");
+        statusLabel.textContent = "Cancelled";
+        progressSection.hidden = false;
+        resetGenerateUI();
+        return;
+    }
+
+    if (!serverUrl) return;
     if (!app.activeDocument) {
         statusLabel.textContent = "No document open";
         progressSection.hidden = false;
@@ -214,8 +250,8 @@ generateBtn.addEventListener("click", async () => {
     }
 
     isGenerating = true;
-    generateBtn.disabled = true;
-    generateBtn.textContent = "Generating...";
+    generateBtn.disabled = false;
+    generateBtn.textContent = "Cancel";
     clearPreview();
 
     try {
@@ -229,13 +265,22 @@ generateBtn.addEventListener("click", async () => {
 
         await uploadToComfyUI(imageData);
         await queueWorkflow();
+
+        // Safety timeout — reset UI if no response after 5 minutes
+        generateTimeout = setTimeout(() => {
+            if (isGenerating) {
+                progressStatus.setAttribute("variant", "negative");
+                statusLabel.textContent = "Timed out — no response from ComfyUI";
+                progressSection.hidden = false;
+                resetGenerateUI();
+            }
+        }, 5 * 60 * 1000);
     } catch (e) {
         console.error("[PS Bridge] Generate error:", e);
+        progressStatus.setAttribute("variant", "negative");
         statusLabel.textContent = `Error: ${e?.message || e?.description || String(e) || "Unknown error"}`;
         progressSection.hidden = false;
-        isGenerating = false;
-        generateBtn.disabled = false;
-        generateBtn.textContent = "Generate";
+        resetGenerateUI();
     }
 });
 
@@ -370,7 +415,13 @@ async function uploadToComfyUI(data) {
         throw new Error(`Upload failed: ${resp.status} ${text}`);
     }
 
-    return resp.json();
+    const respData = await resp.json();
+    if (respData.warning) {
+        console.warn("[PS Bridge] Server warning:", respData.warning);
+        statusLabel.textContent = `Warning: ${respData.warning}`;
+        progressSection.hidden = false;
+    }
+    return respData;
 }
 
 // ─── Queue Workflow ───
@@ -398,21 +449,19 @@ function handleResult(msg) {
     previewImage.src = `data:image/png;base64,${msg.image}`;
     previewSection.hidden = false;
     progressSection.hidden = true;
-    isGenerating = false;
-    generateBtn.disabled = false;
-    generateBtn.textContent = "Generate";
+    resetGenerateUI();
+    addToHistory(pendingResult);
 }
 
 // ─── Apply Result to Canvas ───
-async function applyResultToCanvas() {
-    if (!pendingResult) return;
+async function applyResultToCanvas(resultOverride) {
+    const result = resultOverride || pendingResult;
+    if (!result) return;
     if (!app.activeDocument) {
         statusLabel.textContent = "No document open";
         progressSection.hidden = false;
         return;
     }
-
-    const result = pendingResult;
 
     try {
         await executeAsModal(async () => {
@@ -432,7 +481,14 @@ async function applyResultToCanvas() {
                 _obj: "placeEvent",
                 null: { _path: token, _kind: "local" },
                 freeTransformCenterState: { _enum: "quadCenterState", _value: "QCSAverage" },
-                linked: true
+                linked: false
+            }], { synchronousExecution: true });
+
+            // Rename the layer
+            await batchPlay([{
+                _obj: "set",
+                _target: [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }],
+                to: { _obj: "layer", name: "ComfyUI Result" }
             }], { synchronousExecution: true });
 
             // Scale and position to match selection bounds
@@ -505,7 +561,13 @@ async function applyResultToCanvas() {
                 }], { synchronousExecution: true });
             }
 
-        }, { commandName: "Place ComfyUI Result" });
+        }, {
+            commandName: "Place ComfyUI Result",
+            historyStateInfo: {
+                name: "Place ComfyUI Result",
+                target: { _ref: "document", _enum: "ordinal", _value: "targetEnum" }
+            }
+        });
 
     } catch (e) {
         console.error("[PS Bridge] Result placement error:", e);
@@ -513,6 +575,53 @@ async function applyResultToCanvas() {
         progressSection.hidden = false;
     }
 }
+
+// ─── History ───
+function addToHistory(result) {
+    if (!historyEnabled) return;
+    generationHistory.unshift({ ...result });
+    if (generationHistory.length > MAX_HISTORY) {
+        generationHistory.pop();
+    }
+    renderHistory();
+}
+
+function renderHistory() {
+    historyGrid.innerHTML = "";
+    for (let i = 0; i < generationHistory.length; i++) {
+        const item = generationHistory[i];
+        const img = document.createElement("img");
+        img.className = "history-thumb" + (i === 0 ? " latest" : "");
+        img.src = `data:image/png;base64,${item.base64}`;
+        img.alt = `Generation ${generationHistory.length - i}`;
+        img.title = `Generation ${generationHistory.length - i} — click to apply`;
+        img.addEventListener("click", () => applyHistoryItem(i));
+        historyGrid.appendChild(img);
+    }
+    historyLabel.textContent = `History (${generationHistory.length})`;
+    const show = historyEnabled && generationHistory.length > 0;
+    historyGrid.hidden = !show;
+    historyControls.hidden = !show;
+    historyControls.style.display = show ? "block" : "none";
+}
+
+async function applyHistoryItem(index) {
+    const item = generationHistory[index];
+    await applyResultToCanvas(item);
+}
+
+historySwitch.addEventListener("change", () => {
+    historyEnabled = historySwitch.checked;
+    if (!historyEnabled) {
+        generationHistory.length = 0;
+    }
+    renderHistory();
+});
+
+clearHistoryBtn.addEventListener("click", () => {
+    generationHistory.length = 0;
+    renderHistory();
+});
 
 // ─── Clear Preview ───
 function clearPreview() {

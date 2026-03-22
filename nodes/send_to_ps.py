@@ -1,10 +1,13 @@
 import asyncio
 import base64
+import os
+import random
 import threading
 from io import BytesIO
 import torch
 import numpy as np
 from PIL import Image
+import folder_paths
 
 
 class SendToPS:
@@ -38,7 +41,9 @@ class SendToPS:
                 future = asyncio.run_coroutine_threadsafe(
                     bridge.send_result_to_ps(image_base64, w, h), bridge._loop
                 )
-                future.result(timeout=10)
+                sent = future.result(timeout=10)
+                if not sent:
+                    print("[PS Bridge] WARNING: No Photoshop client connected. Result was not delivered.")
             except Exception as e:
                 print(f"[PS Bridge] Error sending to PS: {e}")
 
@@ -46,4 +51,16 @@ class SendToPS:
         thread.start()
         thread.join(timeout=10)
 
-        return {}
+        # Save preview to temp directory
+        preview_results = []
+        try:
+            temp_dir = folder_paths.get_temp_directory()
+            prefix = "_psbs_" + ''.join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(5))
+            full_path, filename, counter, subfolder, _ = folder_paths.get_save_image_path(prefix, temp_dir, w, h)
+            file = f"{filename}_{counter:05}_.png"
+            pil_image.save(os.path.join(full_path, file), compress_level=1)
+            preview_results.append({"filename": file, "subfolder": subfolder, "type": "temp"})
+        except Exception as e:
+            print(f"[PS Bridge] Preview save error: {e}")
+
+        return {"ui": {"images": preview_results}}

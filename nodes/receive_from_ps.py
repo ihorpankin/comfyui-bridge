@@ -1,9 +1,11 @@
 import os
 import json
 import hashlib
+import random
 import numpy as np
 import torch
 from PIL import Image, ImageFile
+import folder_paths
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -98,7 +100,21 @@ class ReceiveFromPS:
         else:
             mask_tensor = torch.ones((1, h, w), dtype=torch.float32)
 
-        return (image_tensor, mask_tensor, w, h)
+        # Save preview to temp directory
+        preview_results = []
+        try:
+            temp_dir = folder_paths.get_temp_directory()
+            prefix = "_psbr_" + ''.join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(5))
+            full_path, filename, counter, subfolder, _ = folder_paths.get_save_image_path(prefix, temp_dir, w, h)
+            for i in range(image_tensor.shape[0]):
+                arr = (image_tensor[i].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+                Image.fromarray(arr).save(os.path.join(full_path, f"{filename}_{counter:05}_.png"), compress_level=1)
+                preview_results.append({"filename": f"{filename}_{counter:05}_.png", "subfolder": subfolder, "type": "temp"})
+                counter += 1
+        except Exception as e:
+            print(f"[PS Bridge] Preview save error: {e}")
+
+        return {"ui": {"images": preview_results}, "result": (image_tensor, mask_tensor, w, h)}
 
     @classmethod
     def IS_CHANGED(cls):

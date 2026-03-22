@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A ComfyUI custom node that bridges Adobe Photoshop (UXP plugin) and ComfyUI. Photoshop sends the canvas image and selection mask to ComfyUI for AI processing, ComfyUI runs the workflow, and the result is placed back as a new Photoshop layer.
+A ComfyUI custom node that bridges Adobe Photoshop (UXP plugin) and ComfyUI. Photoshop sends the canvas image and selection mask to ComfyUI for AI processing, ComfyUI runs the workflow, and the result is placed back as a new Photoshop smart object layer.
 
 No build step exists. All dependencies (Pillow, numpy, torch, aiohttp) ship with ComfyUI.
 
@@ -12,6 +12,7 @@ No build step exists. All dependencies (Pillow, numpy, torch, aiohttp) ship with
 
 - **ComfyUI server:** restart `run_nvidia_gpu.bat` (or equivalent) from the ComfyUI portable root to pick up any Python changes.
 - **Photoshop plugin:** reload the panel via the UXP Developer Tool (`Window > Utilities > UXP Developer Tool`) — use "Load" pointing to `photoshop/manifest.json`, or reload an already-loaded plugin.
+- **Manifest changes** (sizes, icons, permissions): must fully remove and re-add the plugin in UXP Developer Tool. Reload alone does not pick up manifest changes.
 - **ComfyUI JS extension** (`js/progress_relay.js`): reloads with a browser refresh of the ComfyUI web UI (no server restart needed).
 
 ## Architecture
@@ -34,8 +35,8 @@ Photoshop UXP Plugin          Bridge Server                   ComfyUI
 
 **Result flow (ComfyUI → PS):**
 1. `SendToPS.execute()` encodes the output tensor as base64 PNG, then schedules `send_result_to_ps()` on ComfyUI's main event loop via `asyncio.run_coroutine_threadsafe(coro, bridge._loop)`. The loop is captured at `bridge.py` module load time (which runs on the main thread); `asyncio.get_event_loop()` must NOT be called from the worker thread (fails in Python 3.10+).
-2. `bridge.py`'s `send_result_to_ps` sends `{type: "result", image: base64, width, height}` over the persistent WebSocket to Photoshop.
-3. `main.js` decodes the base64, writes to a temp file, and uses `batchPlay placeEvent` to insert it as a new layer.
+2. `bridge.py`'s `send_result_to_ps` sends `{type: "result", image: base64, width, height}` over the persistent WebSocket to Photoshop. Returns `True`/`False` to indicate delivery success.
+3. `main.js` shows the result as a preview. When the user clicks the preview image, it uses `batchPlay placeEvent` to insert it as a smart object, scales/positions it to match the original selection bounds, then restores the selection. All operations are grouped into a single history state via `historyStateInfo` so Ctrl+Z undoes the entire placement.
 
 **Progress/status relay:**
 `progress_relay.js` listens for ComfyUI's `progress`, `execution_start`, `executing`, and `execution_error` events, then POSTs them to `/ps-bridge/progress` and `/ps-bridge/status`. `bridge.py` relays them over the WebSocket to Photoshop.
@@ -60,5 +61,8 @@ Photoshop UXP Plugin          Bridge Server                   ComfyUI
 - Uses Adobe UXP (manifest v6), requires Photoshop ≥ 23.0.0.
 - All document-modifying `batchPlay` calls must run inside `executeAsModal`. HTTP fetch calls must be **outside** `executeAsModal`.
 - `batchPlay` errors are plain objects `{number, description}`, not `Error` instances — always use `e?.message || e?.description || String(e)` in catch blocks.
+- UXP requires `fs.createSessionToken(tempFile)` for batchPlay `_path` arguments — raw `nativePath` strings cause "invalid file token" errors.
 - Server URL is persisted in `localStorage` as `ps_bridge_url`. WebSocket auto-reconnects every 5 s.
 - Ping/pong keepalive fires every 30 s to prevent the WebSocket from timing out.
+- CSS uses `--uxp-host-background-color`, `--uxp-host-text-color`, `--uxp-host-border-color` variables for Photoshop theme compatibility. Keep fallback values for all variables.
+- Generate button doubles as Cancel during generation (POSTs to `/interrupt`). A 5-minute safety timeout resets the UI if ComfyUI never responds.
