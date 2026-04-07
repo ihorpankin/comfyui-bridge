@@ -22,11 +22,13 @@ os.makedirs(_data_dir, exist_ok=True)
 
 
 @PromptServer.instance.routes.get("/ps-bridge/ping")
+@PromptServer.instance.routes.get("/api/ps-bridge/ping")
 async def ping_handler(request):
     return web.json_response({"status": "ok"})
 
 
 @PromptServer.instance.routes.get("/ps-bridge/ws")
+@PromptServer.instance.routes.get("/api/ps-bridge/ws")
 async def websocket_handler(request):
     global _connected_ws
 
@@ -64,6 +66,7 @@ async def websocket_handler(request):
 
 
 @PromptServer.instance.routes.post("/ps-bridge/upload")
+@PromptServer.instance.routes.post("/api/ps-bridge/upload")
 async def upload_handler(request):
     try:
         reader = await request.multipart()
@@ -145,6 +148,7 @@ async def upload_handler(request):
 
 
 @PromptServer.instance.routes.post("/ps-bridge/queue")
+@PromptServer.instance.routes.post("/api/ps-bridge/queue")
 async def queue_handler(request):
     try:
         # Signal the ComfyUI frontend JS extension to call app.queuePrompt()
@@ -157,6 +161,7 @@ async def queue_handler(request):
 
 
 @PromptServer.instance.routes.post("/ps-bridge/progress")
+@PromptServer.instance.routes.post("/api/ps-bridge/progress")
 async def progress_handler(request):
     """Internal endpoint: receives progress from JS extension, relays to PS."""
     try:
@@ -172,6 +177,7 @@ async def progress_handler(request):
 
 
 @PromptServer.instance.routes.post("/ps-bridge/status")
+@PromptServer.instance.routes.post("/api/ps-bridge/status")
 async def status_handler(request):
     """Internal endpoint: receives execution status from JS extension, relays to PS."""
     try:

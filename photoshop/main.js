@@ -5,6 +5,7 @@ const fs = require("uxp").storage.localFileSystem;
 
 // ─── State ───
 let serverUrl = localStorage.getItem("ps_bridge_url") || "";
+let bridgeBase = localStorage.getItem("ps_bridge_base") || "/ps-bridge";
 let currentMode = "mask"; // "mask" or "crop"
 let ws = null;
 let isGenerating = false;
@@ -42,6 +43,22 @@ const historySwitch = document.getElementById("historySwitch");
 const historyLabel = document.getElementById("historyLabel");
 
 // ─── Settings ───
+function normalizeServerUrl(value) {
+    if (!value) return "";
+    try {
+        const parsed = new URL(value);
+        // Preserve pathname (for reverse-proxy base paths), but strip trailing slashes.
+        const basePath = parsed.pathname.replace(/\/+$/, "");
+        return `${parsed.origin}${basePath}`;
+    } catch {
+        return value.replace(/\/+$/, "");
+    }
+}
+
+function bridgeUrl(path) {
+    return `${serverUrl}${bridgeBase}${path}`;
+}
+
 settingsBtn.addEventListener("click", () => {
     serverUrlInput.value = serverUrl;
     testResult.textContent = "";
@@ -54,23 +71,34 @@ cancelBtn.addEventListener("click", () => {
 });
 
 saveBtn.addEventListener("click", () => {
-    serverUrl = serverUrlInput.value.replace(/\/+$/, "");
+    serverUrl = normalizeServerUrl(serverUrlInput.value);
     localStorage.setItem("ps_bridge_url", serverUrl);
     settingsDialog.close();
     connectWebSocket();
 });
 
 testBtn.addEventListener("click", async () => {
-    const url = serverUrlInput.value.replace(/\/+$/, "");
+    const url = normalizeServerUrl(serverUrlInput.value);
     testResult.textContent = "Testing...";
     testResult.className = "test-result";
     try {
-        const resp = await fetch(`${url}/ps-bridge/ping`);
-        if (resp.ok) {
-            testResult.textContent = "Connected successfully!";
-            testResult.className = "test-result success";
-        } else {
-            testResult.textContent = `Error: HTTP ${resp.status}`;
+        const basesToTry = ["/ps-bridge", "/api/ps-bridge"];
+        let lastStatus = null;
+        let ok = false;
+        for (const base of basesToTry) {
+            const resp = await fetch(`${url}${base}/ping`);
+            lastStatus = resp.status;
+            if (resp.ok) {
+                bridgeBase = base;
+                localStorage.setItem("ps_bridge_base", bridgeBase);
+                testResult.textContent = "Connected successfully!";
+                testResult.className = "test-result success";
+                ok = true;
+                break;
+            }
+        }
+        if (!ok) {
+            testResult.textContent = `Error: HTTP ${lastStatus}`;
             testResult.className = "test-result error";
         }
     } catch (e) {
@@ -115,7 +143,7 @@ function connectWebSocket() {
 
     const wsProto = serverUrl.startsWith("https") ? "wss" : "ws";
     const host = serverUrl.replace(/^https?:\/\//, "");
-    const wsUrl = `${wsProto}://${host}/ps-bridge/ws`;
+    const wsUrl = `${wsProto}://${host}${bridgeBase}/ws`;
 
     try {
         ws = new WebSocket(wsUrl);
@@ -405,7 +433,7 @@ async function uploadToComfyUI(data) {
         formData.append("crop_bounds", JSON.stringify(selectionBounds));
     }
 
-    const resp = await fetch(`${serverUrl}/ps-bridge/upload`, {
+    const resp = await fetch(bridgeUrl("/upload"), {
         method: "POST",
         body: formData
     });
@@ -426,7 +454,7 @@ async function uploadToComfyUI(data) {
 
 // ─── Queue Workflow ───
 async function queueWorkflow() {
-    const resp = await fetch(`${serverUrl}/ps-bridge/queue`, {
+    const resp = await fetch(bridgeUrl("/queue"), {
         method: "POST",
         headers: { "Content-Type": "application/json" }
     });
